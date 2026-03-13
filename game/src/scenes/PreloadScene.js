@@ -1,3 +1,5 @@
+import { CrazyGamesSDK } from '../CrazyGamesSDK.js';
+
 export class PreloadScene extends Phaser.Scene {
   constructor() {
     super({ key: 'PreloadScene' });
@@ -79,6 +81,7 @@ export class PreloadScene extends Phaser.Scene {
   }
 
   create() {
+    CrazyGamesSDK.gameLoadingStop();
     this.scene.start('MenuScene');
   }
 }
