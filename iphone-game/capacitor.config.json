@@ -1,0 +1,11 @@
+{
+  "appId": "com.theggcompany.stackattack",
+  "appName": "Stack Attack",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https"
+  },
+  "ios": {
+    "contentInset": "always"
+  }
+}
