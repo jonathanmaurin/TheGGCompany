@@ -107,15 +107,15 @@ export class GameScene extends Phaser.Scene {
       this.nextCoinIn = Phaser.Math.Between(800, 2000);
     }
 
-    // Move obstacles left
+    // Move obstacles left (velocity so physics body + game object stay in sync)
     this.obstacles.getChildren().forEach((obj) => {
-      obj.x -= this.speed * dt;
+      obj.setVelocityX(-this.speed);
       if (obj.x < -100) obj.destroy();
     });
 
     // Move coins left
     this.coinGroup.getChildren().forEach((obj) => {
-      obj.x -= this.speed * dt;
+      obj.setVelocityX(-this.speed);
       if (obj.x < -50) obj.destroy();
     });
 
@@ -138,6 +138,7 @@ export class GameScene extends Phaser.Scene {
     obj.setOrigin(0.5, 1);
     obj.body.setAllowGravity(false);
     obj.body.setImmovable(true);
+    obj.setVelocityX(-this.speed);
     this.obstacles.add(obj);
   }
 
@@ -147,6 +148,7 @@ export class GameScene extends Phaser.Scene {
     const y = yOptions[Phaser.Math.Between(0, yOptions.length - 1)];
     const coin = this.physics.add.image(width + 30, y, 'coin');
     coin.body.setAllowGravity(false);
+    coin.setVelocityX(-this.speed);
     this.coinGroup.add(coin);
   }
 
