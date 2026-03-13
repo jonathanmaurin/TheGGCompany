@@ -1,8 +1,10 @@
 import Phaser from 'phaser';
 
 const BLOCK_HEIGHT = 30;
-const COLORS = [0xFF6B6B, 0xFFE66D, 0x4ECDC4, 0xA8E6CF, 0xFF8B94, 0xC3A6FF, 0xFFD93D, 0x95E1D3];
+// Warm palette: coral, gold, teal, purple, lime
+const COLORS = [0xFF6B6B, 0xFFD93D, 0x4ECDC4, 0xC3A6FF, 0x8BC34A, 0xFF8B94, 0x80DEEA];
 const PERFECT_TOLERANCE = 2;
+const LS_KEY = 'stackattack_best';
 
 // ─── BootScene ────────────────────────────────────────────────────────────────
 
@@ -16,8 +18,7 @@ class BootScene extends Phaser.Scene {
 
     this.cameras.main.setBackgroundColor('#111122');
 
-    // Title
-    this.add.text(width / 2, height / 2 - 60, 'STACK ATTACK', {
+    this.add.text(width / 2, height / 2 - 80, 'STACK ATTACK', {
       fontFamily: 'monospace',
       fontSize: '36px',
       color: '#ffffff',
@@ -25,27 +26,28 @@ class BootScene extends Phaser.Scene {
       strokeThickness: 2,
     }).setOrigin(0.5);
 
-    // Subtitle
-    this.add.text(width / 2, height / 2, 'by TheGGCompany', {
+    this.add.text(width / 2, height / 2 - 20, 'by TheGGCompany', {
       fontFamily: 'monospace',
       fontSize: '16px',
       color: '#888888',
     }).setOrigin(0.5);
 
-    // Tap to start hint
-    const hint = this.add.text(width / 2, height / 2 + 80, 'Tap to Start', {
+    const best = parseInt(localStorage.getItem(LS_KEY) || '0');
+    if (best > 0) {
+      this.add.text(width / 2, height / 2 + 30, `Best: ${best}`, {
+        fontFamily: 'monospace',
+        fontSize: '18px',
+        color: '#FFD93D',
+      }).setOrigin(0.5);
+    }
+
+    const hint = this.add.text(width / 2, height / 2 + 100, 'Tap to Start', {
       fontFamily: 'monospace',
       fontSize: '20px',
       color: '#00ff88',
     }).setOrigin(0.5);
 
-    this.tweens.add({
-      targets: hint,
-      alpha: 0,
-      duration: 600,
-      yoyo: true,
-      repeat: -1,
-    });
+    this.tweens.add({ targets: hint, alpha: 0, duration: 600, yoyo: true, repeat: -1 });
 
     this.input.once('pointerdown', () => this.scene.start('GameScene'));
     this.input.keyboard.once('keydown-SPACE', () => this.scene.start('GameScene'));
@@ -60,9 +62,10 @@ class GameScene extends Phaser.Scene {
   }
 
   init() {
-    this.stack = [];           // Array of { x (center), y (center), width }
+    this.stack = [];           // { x, y, width }
     this.score = 0;
-    this.dropCount = 0;        // Successful drops
+    this.dropCount = 0;
+    this.comboCount = 0;       // consecutive perfect drops
     this.gameRunning = false;
     this.currentBlockData = null;
     this.currentColorIndex = 0;
@@ -76,13 +79,13 @@ class GameScene extends Phaser.Scene {
 
     this.cameras.main.setBackgroundColor('#111122');
 
-    // Base block near the bottom
+    // Base block
     const baseWidth = 200;
     const baseY = height - 80;
     this.addBlockToStack(width / 2, baseY, baseWidth);
 
-    // Score text — fixed to camera (scrollFactor 0)
-    this.scoreText = this.add.text(width / 2, 60, '0', {
+    // Score — fixed to camera
+    this.scoreText = this.add.text(width / 2, 55, '0', {
       fontFamily: 'monospace',
       fontSize: '56px',
       color: '#ffffff',
@@ -90,27 +93,36 @@ class GameScene extends Phaser.Scene {
       strokeThickness: 3,
     }).setOrigin(0.5).setScrollFactor(0).setDepth(10);
 
-    // Input
+    // Combo label (hidden initially)
+    this.comboText = this.add.text(width / 2, 115, '', {
+      fontFamily: 'monospace',
+      fontSize: '20px',
+      color: '#FFD93D',
+      stroke: '#000000',
+      strokeThickness: 2,
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(10).setAlpha(0);
+
     this.input.on('pointerdown', this.onDrop, this);
     this.input.keyboard.on('keydown-SPACE', this.onDrop, this);
 
-    // Start game
     this.gameRunning = true;
     this.spawnBlock();
-
-    // Snap camera to initial position (no lerp lag at start)
     this.cameras.main.setScrollY(this.targetCameraY);
   }
 
-  // ── Block management ──────────────────────────────────────────────────────
+  // ── Block helpers ─────────────────────────────────────────────────────────
 
   addBlockToStack(cx, cy, w) {
     const colorIndex = this.stack.length % COLORS.length;
     const g = this.add.graphics();
+    // Drop shadow
+    g.fillStyle(0x000000, 0.28);
+    g.fillRect(cx - w / 2 + 4, cy - BLOCK_HEIGHT / 2 + 5, w, BLOCK_HEIGHT);
+    // Main block
     g.fillStyle(COLORS[colorIndex]);
     g.fillRect(cx - w / 2, cy - BLOCK_HEIGHT / 2, w, BLOCK_HEIGHT);
-    // Subtle highlight stripe at the top
-    g.fillStyle(0xffffff, 0.18);
+    // Highlight stripe
+    g.fillStyle(0xffffff, 0.2);
     g.fillRect(cx - w / 2, cy - BLOCK_HEIGHT / 2, w, 5);
     this.stack.push({ x: cx, y: cy, width: w });
     return g;
@@ -122,15 +134,13 @@ class GameScene extends Phaser.Scene {
     const newWidth = top.width;
     const { width, height } = this.scale;
 
-    // Update camera target: keep new block at ~35% from top of viewport
+    // Camera target: keep new block ~35% from top of viewport
     this.targetCameraY = newY - height * 0.35;
 
-    // Direction alternates each drop
     const movingRight = this.dropCount % 2 === 0;
     const startX = movingRight ? -newWidth / 2 : width + newWidth / 2;
     const endX   = movingRight ? width + newWidth / 2 : -newWidth / 2;
 
-    // Speed: increase every 5 drops, min duration 400ms
     const speedLevel = Math.floor(this.dropCount / 5);
     const duration = Math.max(400, 2000 - speedLevel * 150);
 
@@ -156,9 +166,11 @@ class GameScene extends Phaser.Scene {
     const { x, y, width } = this.currentBlockData;
     const g = this.currentGraphics;
     g.clear();
+    g.fillStyle(0x000000, 0.28);
+    g.fillRect(x - width / 2 + 4, y - BLOCK_HEIGHT / 2 + 5, width, BLOCK_HEIGHT);
     g.fillStyle(COLORS[this.currentColorIndex]);
     g.fillRect(x - width / 2, y - BLOCK_HEIGHT / 2, width, BLOCK_HEIGHT);
-    g.fillStyle(0xffffff, 0.18);
+    g.fillStyle(0xffffff, 0.2);
     g.fillRect(x - width / 2, y - BLOCK_HEIGHT / 2, width, 5);
   }
 
@@ -182,8 +194,8 @@ class GameScene extends Phaser.Scene {
     const overlapRight = Math.min(blockRight, topRight);
     const overlapW     = overlapRight - overlapLeft;
 
-    // Complete miss
     if (overlapW <= 0) {
+      this.comboCount = 0;
       this.currentGraphics.destroy();
       this.currentGraphics = null;
       this.triggerGameOver();
@@ -196,11 +208,13 @@ class GameScene extends Phaser.Scene {
     if (isPerfect) {
       finalW  = top.width;
       finalCX = top.x;
+      this.comboCount++;
+      this.showPerfectFlash(blockY);
     } else {
       finalW  = overlapW;
       finalCX = (overlapLeft + overlapRight) / 2;
+      this.comboCount = 0;
 
-      // Animate trimmed piece falling away
       const trimW  = blockW - overlapW;
       const trimCX = blockLeft < topLeft
         ? blockLeft + trimW / 2
@@ -208,16 +222,19 @@ class GameScene extends Phaser.Scene {
       this.animateTrim(trimCX, blockY, trimW);
     }
 
-    // Destroy sliding graphics, place settled block
+    // Update combo display
+    this.updateComboDisplay();
+
+    // Score: base 1 + (comboCount - 1) bonus if in combo
+    const points = isPerfect ? this.comboCount : 1;
+    this.score += points;
+    this.dropCount++;
+    this.scoreText.setText(this.score.toString());
+
     this.currentGraphics.destroy();
     this.currentGraphics = null;
     this.addBlockToStack(finalCX, blockY, finalW);
 
-    this.score++;
-    this.dropCount++;
-    this.scoreText.setText(this.score.toString());
-
-    // Game over: block too thin
     if (finalW < 10) {
       this.triggerGameOver();
       return;
@@ -226,27 +243,57 @@ class GameScene extends Phaser.Scene {
     this.spawnBlock();
   }
 
-  animateTrim(cx, cy, w) {
-    const colorIndex = this.currentColorIndex;
-    const g = this.add.graphics();
-    const state = { dy: 0, alpha: 0.85 };
+  showPerfectFlash(worldY) {
+    const { width } = this.scale;
+    const screenY = worldY - this.cameras.main.scrollY;
+    const label = this.comboCount > 1 ? `PERFECT  x${this.comboCount}` : 'PERFECT!';
 
-    const redraw = () => {
-      g.clear();
-      g.fillStyle(COLORS[colorIndex], state.alpha);
-      g.fillRect(cx - w / 2, cy - BLOCK_HEIGHT / 2 + state.dy, w, BLOCK_HEIGHT);
-    };
-
-    redraw();
+    const text = this.add.text(width / 2, screenY - 10, label, {
+      fontFamily: 'monospace',
+      fontSize: '26px',
+      color: '#FFD93D',
+      stroke: '#000000',
+      strokeThickness: 2,
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(20);
 
     this.tweens.add({
-      targets: state,
-      dy: 350,
+      targets: text,
+      y: screenY - 70,
+      alpha: 0,
+      scaleX: 1.4,
+      scaleY: 1.4,
+      duration: 700,
+      ease: 'Cubic.easeOut',
+      onComplete: () => text.destroy(),
+    });
+  }
+
+  updateComboDisplay() {
+    if (this.comboCount >= 2) {
+      this.comboText.setText(`COMBO  x${this.comboCount}`);
+      this.tweens.killTweensOf(this.comboText);
+      this.comboText.setAlpha(1);
+    } else {
+      this.tweens.add({
+        targets: this.comboText,
+        alpha: 0,
+        duration: 300,
+      });
+    }
+  }
+
+  animateTrim(cx, cy, w) {
+    const color = COLORS[this.currentColorIndex];
+    const piece = this.add.rectangle(cx, cy, w, BLOCK_HEIGHT, color, 0.85);
+
+    this.tweens.add({
+      targets: piece,
+      y: cy + 350,
+      angle: Phaser.Math.Between(-120, 120),
       alpha: 0,
       duration: 600,
       ease: 'Cubic.easeIn',
-      onUpdate: redraw,
-      onComplete: () => g.destroy(),
+      onComplete: () => piece.destroy(),
     });
   }
 
@@ -258,22 +305,26 @@ class GameScene extends Phaser.Scene {
       this.moveTween.stop();
       this.moveTween = null;
     }
-
-    // Flash effect
-    this.cameras.main.shake(300, 0.01);
-
-    this.time.delayedCall(800, () => {
+    this.cameras.main.shake(300, 0.012);
+    this.time.delayedCall(900, () => {
       this.scene.start('GameOverScene', { score: this.score });
     });
   }
 
-  // ── Update loop ───────────────────────────────────────────────────────────
+  // ── Update ────────────────────────────────────────────────────────────────
 
   update() {
-    // Smooth camera follow toward targetCameraY
+    // Smooth camera follow
     const curY  = this.cameras.main.scrollY;
     const nextY = Phaser.Math.Linear(curY, this.targetCameraY, 0.08);
     this.cameras.main.setScrollY(nextY);
+
+    // Background darkens as stack grows (dark blue → near-black at 30 stacks)
+    const t = Phaser.Math.Clamp((this.stack.length - 1) / 30, 0, 1);
+    const r = Math.round(Phaser.Math.Linear(0x11, 0x04, t));
+    const g = Math.round(Phaser.Math.Linear(0x11, 0x04, t));
+    const b = Math.round(Phaser.Math.Linear(0x22, 0x08, t));
+    this.cameras.main.setBackgroundColor(Phaser.Display.Color.GetColor(r, g, b));
   }
 }
 
@@ -293,7 +344,15 @@ class GameOverScene extends Phaser.Scene {
 
     this.cameras.main.setBackgroundColor('#111122');
 
-    this.add.text(width / 2, height / 2 - 120, 'GAME OVER', {
+    // Read / write high score
+    const prevBest = parseInt(localStorage.getItem(LS_KEY) || '0');
+    const isNewBest = this.finalScore > prevBest;
+    if (isNewBest) {
+      localStorage.setItem(LS_KEY, this.finalScore.toString());
+    }
+    const best = isNewBest ? this.finalScore : prevBest;
+
+    this.add.text(width / 2, height / 2 - 160, 'GAME OVER', {
       fontFamily: 'monospace',
       fontSize: '40px',
       color: '#FF6B6B',
@@ -301,28 +360,64 @@ class GameOverScene extends Phaser.Scene {
       strokeThickness: 3,
     }).setOrigin(0.5);
 
-    this.add.text(width / 2, height / 2 - 40, `Score: ${this.finalScore}`, {
+    // Score — count up animation
+    const scoreText = this.add.text(width / 2, height / 2 - 70, 'Score: 0', {
       fontFamily: 'monospace',
-      fontSize: '36px',
+      fontSize: '34px',
       color: '#ffffff',
     }).setOrigin(0.5);
 
-    const restart = this.add.text(width / 2, height / 2 + 80, 'Tap to Play Again', {
+    const counter = { val: 0 };
+    this.tweens.add({
+      targets: counter,
+      val: this.finalScore,
+      duration: Math.min(1200, Math.max(400, this.finalScore * 25)),
+      ease: 'Cubic.easeOut',
+      onUpdate: () => scoreText.setText(`Score: ${Math.floor(counter.val)}`),
+    });
+
+    // Best score
+    this.add.text(width / 2, height / 2 - 10, `Best: ${best}`, {
+      fontFamily: 'monospace',
+      fontSize: '22px',
+      color: '#888888',
+    }).setOrigin(0.5);
+
+    // NEW HIGH SCORE badge
+    if (isNewBest && this.finalScore > 0) {
+      const badge = this.add.text(width / 2, height / 2 + 45, '★  NEW HIGH SCORE!  ★', {
+        fontFamily: 'monospace',
+        fontSize: '20px',
+        color: '#FFD93D',
+        stroke: '#000000',
+        strokeThickness: 2,
+      }).setOrigin(0.5);
+
+      this.tweens.add({
+        targets: badge,
+        scaleX: 1.1,
+        scaleY: 1.1,
+        duration: 400,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut',
+      });
+    }
+
+    // Tap to restart
+    const restart = this.add.text(width / 2, height / 2 + 130, 'Tap to Play Again', {
       fontFamily: 'monospace',
       fontSize: '22px',
       color: '#4ECDC4',
     }).setOrigin(0.5);
 
-    this.tweens.add({
-      targets: restart,
-      alpha: 0,
-      duration: 600,
-      yoyo: true,
-      repeat: -1,
-    });
+    this.tweens.add({ targets: restart, alpha: 0, duration: 600, yoyo: true, repeat: -1 });
 
-    this.input.once('pointerdown', () => this.scene.start('GameScene'));
-    this.input.keyboard.once('keydown-SPACE', () => this.scene.start('GameScene'));
+    // Delay input slightly so accidental taps don't skip game over screen
+    this.time.delayedCall(600, () => {
+      this.input.once('pointerdown', () => this.scene.start('GameScene'));
+      this.input.keyboard.once('keydown-SPACE', () => this.scene.start('GameScene'));
+    });
   }
 }
 
