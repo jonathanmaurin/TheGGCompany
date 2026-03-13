@@ -64,4 +64,32 @@ export const CrazyGamesSDK = {
       }
     });
   },
+
+  /**
+   * Submit a score to the CrazyGames leaderboard.
+   * @param {number} score
+   */
+  async submitScore(score) {
+    try {
+      if (!sdk()) return;
+      await sdk().leaderboard.submitScore({ name: 'highscore', score });
+    } catch (e) {
+      console.warn('[CrazyGames] submitScore failed:', e.message);
+    }
+  },
+
+  /**
+   * Get top scores from the CrazyGames leaderboard.
+   * Resolves with an array of { name, score } or [] on failure.
+   */
+  async getLeaderboard() {
+    try {
+      if (!sdk()) return [];
+      const result = await sdk().leaderboard.getScores({ name: 'highscore', maxResults: 5 });
+      return result?.scores ?? [];
+    } catch (e) {
+      console.warn('[CrazyGames] getLeaderboard failed:', e.message);
+      return [];
+    }
+  },
 };
